@@ -6,14 +6,13 @@ bool pulse = true;
 Servo servoL;
 Servo servoR;
 Servo armServo;
-int lpos = 0;
-int rpos = 0;
+int lposFinal, rposFinal;
 // ir sensor
 #include <QTRSensors.h>
 QTRSensors qtr;
-const int sensorL = ; //any analog pins
-const int sensorM = ; //any analog pins
-const int sensorR = ; //any analog pins
+const int sensorL = 26; //any analog pins
+const int sensorM = 25; //any analog pins
+const int sensorR = 24; //any analog pins
 
 void calibrate() {
   resetCalibration();
@@ -36,12 +35,6 @@ void pidController() {
   D = error + lastError;
   int servoSpeed = P*Kp + I*Ki + D*Kd; //Calculates the correction value
   lastError = error;
-  /* Do this in motor section of loop
-  finalServoL = servoSpeed + baseServoSpeed
-  finalServoR = servoSpeed + baseServoSpeed
-  If servo exceeds maxspeed, limit servo to maxspeed
-  Apply new values to servo, preferably with a function
-  */
 }
 // us sensor
 const int buzzer = ; 
@@ -51,7 +44,8 @@ float timing = 0.0;
 float distance = 0.0;
 /*
 issues and to do
-calibration buttons and wireless calibration
+calibration buttons and code
+wireless start for IoT challenge
 figure out how to track amnt of times track has been run
 turn around AS SOON as you hit the line
 start button
@@ -76,11 +70,9 @@ void setup() {
   digitalWrite(trigpin, LOW);
   digitalWrite(buzzer, LOW);
 
-  servoL.attach(1); //arbitrary pin numbers, adjust later
-  servoR.attach(2);
-  armServo.attach(3);
-  lpos = map(); //left motorspeed, min, max, 0, 180,
-  rpos = map(); //right motorspeed, min, max, 0, 180,
+  servoL.attach(19); 
+  servoR.attach(20);
+  armServo.attach(3); //placeholder pin
 
   qtr.setTypeAnalog();
   qtr.setSensorPins((const uint8_t[]){sensorL, sensorM, sensorR}, 3);
@@ -113,7 +105,26 @@ void loop() {
 
   pidController();
   //motor code (All detection logic will go here) \/
-  //nothing yet
+  /*
+  finalServoL = servoSpeed + baseServoSpeed
+  finalServoR = servoSpeed + baseServoSpeed
+  If servo exceeds maxspeed, limit servo to maxspeed
+  Apply new values to servo, preferably with a function
+  */
+  //2500 = base speeds while going straight (about 80% max, change in testing to visualize pid)
+  int16_t lMotorSpeed = 2500 + servoSpeed; //may need to change signs based on motor directionality (i'm dumb)
+  int16_t rMotorSpeed = 2500 - servoSpeed; 
+
+  if (lMotorSpeed > 3000) {lMotorSpeed = 3000} //may need to change logic based on motor directionality
+  if (rMotorSpeed > 3000) {rMotorSpeed = 3000}
+  if (lMotorSpeed < 1000) {lMotorSpeed = 1000} 
+  if (rMotorSpeed < 1000) {rMotorSpeed = 1000}
+  
+  lposFinal = map(lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
+  rposFinal = map(rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
+  
+  servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
+  servoR.write(rposFinal);
 
   // us sensor code \/
   digitalWrite(trigpin, LOW);
@@ -135,7 +146,7 @@ void loop() {
   distance = (timing * 0.034) / 2;
   //Serial.println("Distance: " + distance);
   if (distance <= 10) {
-    //turn 180
+    //turn 180, set a boolean to true while pos = 1000 (black under middle ir) and resume normal code
     // maybe add buzzer noise for fun
   } /* else {
     stop buzzer noise
