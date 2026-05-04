@@ -7,6 +7,9 @@ Servo servoL;
 Servo servoR;
 Servo armServo;
 int lposFinal, rposFinal;
+//some stuff required for logic \/
+int lineCrossed = -1; //tallying line crosses except for the starting line
+int requirement = 4; //4 turns, 2 laps
 // ir sensor
 #include <QTRSensors.h>
 QTRSensors qtr;
@@ -44,11 +47,10 @@ float timing = 0.0;
 float distance = 0.0;
 /*
 issues and to do
-calibration buttons and code
-wireless start for IoT challenge
-figure out how to track amnt of times track has been run
-turn around AS SOON as you hit the line
+calibration sequence
+wireless start for IoT challenge ("Adafruit IO via a WiFi connection")
 start button
+conditinal for challenge three to prevent unneccessary movement (?)
 literally all the code
 */
 void setup() {
@@ -57,9 +59,7 @@ void setup() {
   set up ultrasonic sensor
   set up ir sensors
   set up servo motors
-  basic logic for start up
-    Drive forward (until ir sensor detection, set up in loop)
-    Reset arm to starting position
+  Reset arm to starting position if need be
   */
   elapsedMillis TaskTimer;
   //potential defined delay value
@@ -126,6 +126,22 @@ void loop() {
   servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
   servoR.write(rposFinal);
 
+  if ((sensors[0] > 800) && (sensors[1] > 800) && (sensors[2] > 800))
+  {
+    int lineCrossed++;
+    if (lineCrossed == 0) {return;}
+    if (lineCrossed >= requirement) {exit(0);} //robot should stop after 2 laps
+    //Turn around
+    //may need to add a slight delay for sensors to cross the "T" fully
+    servoL.write(180); //full
+    servoR.write(100); //barely any movement
+    //wait however many seconds for a full turn or use the below while
+    while (qtr.readLineBlack(sensors) >= 950 && qtr.readLineBlack(sensors) <= 1050) {
+      //empty to stall
+    } // if this while somehow blocks .readlineblack function research "std::thread" instead
+    return;
+  }
+
   // us sensor code \/
   digitalWrite(trigpin, LOW);
   if (pulse) {
@@ -146,9 +162,19 @@ void loop() {
   distance = (timing * 0.034) / 2;
   //Serial.println("Distance: " + distance);
   if (distance <= 10) {
-    //turn 180, set a boolean to true while pos = 1000 (black under middle ir) and resume normal code
+    //just cut and pasted code from motor section
+    requirement = 2; //Should stop after a lap to the obstacle and back due to the logic in motor section
+    int lineCrossed++;
+    if (lineCrossed == 0) {return;}
+    //Turn around
+    //may need to add a slight delay for sensors to cross the "T" fully
+    servoL.write(180); //full
+    servoR.write(100); //barely any movement
+    //wait however many seconds for a full turn or use the below while
+    while (qtr.readLineBlack(sensors) >= 950 && qtr.readLineBlack(sensors) <= 1050) {
+      //empty to stall
+    } // if this while somehow blocks .readlineblack function research "std::thread" instead
+    return;
     // maybe add buzzer noise for fun
-  } /* else {
-    stop buzzer noise
-  } */
+  }
 }
