@@ -59,6 +59,10 @@ float Kp = 0.60; // tune this
 float Ki = 0.00;
 float Kd = 0.15;
 float P = 0.0, I = 0.0, D = 0.0, lastError = 0.0, servoSpeed = 0.0;
+// debug and tuning helpers
+bool invertCorrection = false; // flip to true if correction sign is inverted
+const float I_WINDUP_LIMIT = 200.0; // limit integral term
+const int DEADZONE = 30; // small deadband around center to avoid hunting
 
 // QTR scaling constants (3 sensors -> 0..2000, center ~1000)
 const int NUM_SENSORS = 3;
@@ -73,10 +77,16 @@ const int MOTOR_STOP = 1500; // this corresponds to servo=90 (stop)
 void pidController() {
   //Read the position using sensors/library objects
   float error = (float)position - (float)QTR_MID; // center on QTR_MID
+  // Apply deadzone
+  if (abs((int)error) < DEADZONE) error = 0;
   P = error;
   I = I + error;
+  // integral windup clamp
+  if (I > I_WINDUP_LIMIT) I = I_WINDUP_LIMIT;
+  if (I < -I_WINDUP_LIMIT) I = -I_WINDUP_LIMIT;
   D = error - lastError;
   servoSpeed = Kp * P + Ki * I + Kd * D; // Calculates the correction value (float)
+  if (invertCorrection) servoSpeed = -servoSpeed;
   lastError = error;
 }
 // us sensor
@@ -211,8 +221,15 @@ void loop() {
   // map to servo write range 0-180
   lposFinal = map((int)lMotorSpeedF, MOTOR_MIN, MOTOR_MAX, 0, 180);
   rposFinal = map((int)rMotorSpeedF, MOTOR_MIN, MOTOR_MAX, 0, 180);
-  Serial.println(lposFinal);
-  Serial.println(rposFinal);
+  // Telemetry for tuning: sensors[], position, PID components and servo outputs
+  Serial.print("S:"); Serial.print(sensors[0]); Serial.print(","); Serial.print(sensors[1]); Serial.print(","); Serial.print(sensors[2]);
+  Serial.print(" P"); Serial.print(P);
+  Serial.print(" I"); Serial.print(I);
+  Serial.print(" D"); Serial.print(D);
+  Serial.print(" pos:"); Serial.print(position);
+  Serial.print(" servoSpeed:"); Serial.print(servoSpeed);
+  Serial.print(" L:"); Serial.print(lposFinal);
+  Serial.print(" R:"); Serial.println(rposFinal);
 
   servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
   servoR.write(rposFinal);
