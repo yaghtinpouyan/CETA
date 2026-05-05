@@ -57,7 +57,7 @@ void calibrate() {
 //PID stuffs
 float Kp = 0.0; // to two or more decimal places
 float Ki = 0.0; // to 4 or more decimal places
-float Kd = 0.3; // to one decimal place
+float Kd = 0.5; // to one decimal place
 int P, I, D, lastError, servoSpeed;
 void pidController() {
   //Read the position using sensors/library objects
@@ -192,16 +192,19 @@ void loop() {
   if (rMotorSpeed > 3000) {
     rMotorSpeed = 3000;
   }
-  if (lMotorSpeed < 1000) {
-    lMotorSpeed = 1000;
+    if (lMotorSpeed > 1500) {
+    lMotorSpeed = 1500;
   } 
-  if (rMotorSpeed < 1000) {
-    rMotorSpeed = 1000;
+  if (rMotorSpeed < 1500) {
+    rMotorSpeed = 1500;
   }
+  
   
   lposFinal = map(lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
   rposFinal = map(rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
-  
+  Serial.println(lposFinal);
+  Serial.println(rposFinal);
+
   servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
   servoR.write(rposFinal);
 
@@ -251,8 +254,8 @@ void loop() {
     if (lineCrossed == 0) {return;}
     //Turn around
     //may need to add a slight delay for sensors to cross the "T" fully
-    servoL.write(180); //full
-    servoR.write(100); //barely any movement
+    servoL.write(0); //full
+    servoR.write(90); //no movement
     //wait however many seconds for a full turn or use the below while
     while (qtr.readLineBlack(sensors) >= 950 && qtr.readLineBlack(sensors) <= 1050) {
       //empty to stall
