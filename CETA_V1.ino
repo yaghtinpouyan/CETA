@@ -1,5 +1,6 @@
 //non blocking delays !!!
 #include <elapsedMillis.h>
+elapsedMillis TaskTimer;
 bool pulse = true;
 // motors and arm
 #include <Servo.h>
@@ -10,39 +11,62 @@ int lposFinal, rposFinal;
 //some stuff required for logic \/
 int lineCrossed = -1; //tallying line crosses except for the starting line
 int requirement = 4; //4 turns, 2 laps
+bool start = false;
+int calibrateButton = 31;
+int startButton = 34;
 // ir sensor
 #include <QTRSensors.h>
 QTRSensors qtr;
-const int sensorL = 26; //any analog pins
-const int sensorM = 25; //any analog pins
-const int sensorR = 24; //any analog pins
-
+int16_t position;
+const int sensorL = 26;
+const int sensorM = 25;
+const int sensorR = 24;
+bool calibratedCheck = false;
 void calibrate() {
-  resetCalibration();
+  qtr.resetCalibration();
   for (uint8_t i = 0; i < 1000; i++) //10 seconds on black, 10 on white
   {
     qtr.calibrate();
+    if (i <= 500) {
+      if (TaskTimer >= 500) { //stay on one color
+      digitalWrite(LED_BUILTIN, HIGH);
+        if (TaskTimer >= 1000) {
+        digitalWrite(LED_BUILTIN, LOW);
+        TaskTimer = 0;
+        }
+      }
+    }
+    if (i > 500) { //move to other color
+      if (TaskTimer >= 250) {
+      digitalWrite(LED_BUILTIN, HIGH);
+        if (TaskTimer >= 500) {
+        digitalWrite(LED_BUILTIN, LOW);
+        TaskTimer = 0;
+        }
+      }
+    }
     delay(20);
   }
+  calibratedCheck = true;
 }
 //PID stuffs
 float Kp = 0.0; // to two or more decimal places
 float Ki = 0.0; // to 4 or more decimal places
 float Kd = 0.0; // to one decimal place
-int P, I, D, lastError;
+int P, I, D, lastError, servoSpeed;
 void pidController() {
   //Read the position using sensors/library objects
   int16_t error = position - 1000; //current position (0 - 3000) - ideal position
   P = error;
   I = I + error;
   D = error + lastError;
-  int servoSpeed = P*Kp + I*Ki + D*Kd; //Calculates the correction value
+  servoSpeed = P*Kp + I*Ki + D*Kd; //Calculates the correction value
   lastError = error;
 }
 // us sensor
-const int buzzer = ; 
-const int trigpin = ; 
-const int echopin = ; 
+const int buzzer = 1; 
+const int trigpin = 2; 
+const int echopin = 3; 
 float timing = 0.0;
 float distance = 0.0;
 /*
@@ -52,6 +76,7 @@ wireless start for IoT challenge ("Adafruit IO via a WiFi connection")
 start button
 conditinal for challenge three to prevent unneccessary movement (?)
 literally all the code
+buttons are on 31, 32 and 34
 */
 void setup() {
   /*
@@ -61,7 +86,19 @@ void setup() {
   set up servo motors
   Reset arm to starting position if need be
   */
-  elapsedMillis TaskTimer;
+  //adafruit
+  #define IO_USERNAME "jdanielceta"
+  #define IO_KEY "aio_CaIa27NPW51spB473kzvEf3M4Chq"
+  #define WIFI_SSID "your_wifi_name" //Wifi Name
+  #define WIFI_PASS "your_wifi_password" //Wifi Password
+  /*
+    AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, WIFI_SSID, WIFI_PASS);
+    io.connect();
+  */
+  //random stuff
+  pinMode(calibrateButton, INPUT_PULLUP);
+  pinMode(startButton, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT);
   //potential defined delay value
   
   pinMode(echopin, INPUT);
@@ -76,8 +113,6 @@ void setup() {
 
   qtr.setTypeAnalog();
   qtr.setSensorPins((const uint8_t[]){sensorL, sensorM, sensorR}, 3);
-
-  Serial.begin(9600);
 }
 
 void loop() {
@@ -99,9 +134,28 @@ void loop() {
   arm (conditional ?)
     (needs discussion on design and looking at rules)
   */
+  //calibrate and start
+  if (calibrateButton == LOW) {
+    /*
+      if (TaskTimer >= 3000) {
+      if (digitalRead(calibrateButton) == LOW) {
+        calibrate();
+        TaskTimer = 0;
+      } else {TaskTimer = 0;}
+    }
+    */
+    calibrate();
+  }
+  if (digitalRead(startButton) == LOW) {
+    if (start == false) {
+      start = true;
+    }
+  }
+  if (!start) {return;}
+
   //ir sensor detection \/
   uint16_t sensors[3];
-  int16_t position = qtr.readLineBlack(sensors);
+  position = qtr.readLineBlack(sensors);
 
   pidController();
   //motor code (All detection logic will go here) \/
@@ -115,10 +169,10 @@ void loop() {
   int16_t lMotorSpeed = 2500 + servoSpeed; //may need to change signs based on motor directionality (i'm dumb)
   int16_t rMotorSpeed = 2500 - servoSpeed; 
 
-  if (lMotorSpeed > 3000) {lMotorSpeed = 3000} //may need to change logic based on motor directionality
-  if (rMotorSpeed > 3000) {rMotorSpeed = 3000}
-  if (lMotorSpeed < 1000) {lMotorSpeed = 1000} 
-  if (rMotorSpeed < 1000) {rMotorSpeed = 1000}
+  if (lMotorSpeed > 3000) {lMotorSpeed = 3000;} //may need to change logic based on motor directionality
+  if (rMotorSpeed > 3000) {rMotorSpeed = 3000;}
+  if (lMotorSpeed < 1000) {lMotorSpeed = 1000;} 
+  if (rMotorSpeed < 1000) {rMotorSpeed = 1000;}
   
   lposFinal = map(lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
   rposFinal = map(rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
@@ -128,9 +182,9 @@ void loop() {
 
   if ((sensors[0] > 800) && (sensors[1] > 800) && (sensors[2] > 800))
   {
-    int lineCrossed++;
+    lineCrossed++;
     if (lineCrossed == 0) {return;}
-    if (lineCrossed >= requirement) {exit(0);} //robot should stop after 2 laps
+    if (lineCrossed >= requirement) {start = false;} //robot should stop after 2 laps
     //Turn around
     //may need to add a slight delay for sensors to cross the "T" fully
     servoL.write(180); //full
@@ -147,6 +201,7 @@ void loop() {
   if (pulse) {
     if (TaskTimer >= 2) {
       digitalWrite(trigpin, HIGH);
+      TaskTimer = 0;
     }
     pulse = false;
   }
@@ -154,6 +209,7 @@ void loop() {
   if (!pulse) {
     if (TaskTimer >= 10) {
       digitalWrite(trigpin, LOW);
+      TaskTimer = 0;
     }
     pulse = true;
   }
@@ -164,7 +220,7 @@ void loop() {
   if (distance <= 10) {
     //just cut and pasted code from motor section
     requirement = 2; //Should stop after a lap to the obstacle and back due to the logic in motor section
-    int lineCrossed++;
+    lineCrossed++;
     if (lineCrossed == 0) {return;}
     //Turn around
     //may need to add a slight delay for sensors to cross the "T" fully
