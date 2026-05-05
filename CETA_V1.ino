@@ -12,15 +12,15 @@ int lposFinal, rposFinal;
 int lineCrossed = -1; //tallying line crosses except for the starting line
 int requirement = 4; //4 turns, 2 laps
 bool start = false;
-int calibrateButton = 31;
-int startButton = 34;
+int calibrateButton = 24;
+int startButton = 26;
 // ir sensor
 #include <QTRSensors.h>
 QTRSensors qtr;
 int16_t position;
-const int sensorL = 26;
-const int sensorM = 25;
-const int sensorR = 24;
+const int sensorL = 34; //pre 26
+const int sensorM = 32; // pre 25
+const int sensorR = 31; //pre 24
 bool calibratedCheck = false;
 void calibrate() {
   qtr.resetCalibration();
@@ -64,11 +64,13 @@ void pidController() {
   lastError = error;
 }
 // us sensor
-const int buzzer = 1; 
-const int trigpin = 2; 
-const int echopin = 3; 
-float timing = 0.0;
-float distance = 0.0;
+/*
+  const int buzzer = 1; 
+  const int trigpin = 2; 
+  const int echopin = 3; 
+  */
+  float timing = 0.0;
+  float distance = 0.0;
 /*
 issues and to do
 calibration sequence
@@ -87,8 +89,8 @@ void setup() {
   Reset arm to starting position if need be
   */
   //adafruit
-  #define IO_USERNAME "jdanielceta"
-  #define IO_KEY "aio_CaIa27NPW51spB473kzvEf3M4Chq"
+  #define IO_USERNAME "placeholder"
+  #define IO_KEY "placeholder"
   #define WIFI_SSID "your_wifi_name" //Wifi Name
   #define WIFI_PASS "your_wifi_password" //Wifi Password
   /*
@@ -100,22 +102,25 @@ void setup() {
   pinMode(startButton, INPUT_PULLUP);
   pinMode(LED_BUILTIN, OUTPUT);
   //potential defined delay value
-  
+  /*
   pinMode(echopin, INPUT);
   pinMode(trigpin, OUTPUT);
   pinMode(buzzer, OUTPUT);
   digitalWrite(trigpin, LOW);
   digitalWrite(buzzer, LOW);
-
+  */
   servoL.attach(19); 
   servoR.attach(20);
   armServo.attach(3); //placeholder pin
 
   qtr.setTypeAnalog();
   qtr.setSensorPins((const uint8_t[]){sensorL, sensorM, sensorR}, 3);
+
+  Serial.begin(9600);
 }
 
 void loop() {
+  Serial.println("Serial Monitor Begin");
   // pseudocode
   /*
   ir sensor
@@ -144,12 +149,14 @@ void loop() {
       } else {TaskTimer = 0;}
     }
     */
+    Serial.println("Calibrate Button WOrks!");
     calibrate();
   }
   if (digitalRead(startButton) == LOW) {
     if (start == false) {
       start = true;
     }
+    Serial.println("start button works!");
   }
   if (!start) {return;}
 
@@ -197,7 +204,8 @@ void loop() {
   }
 
   // us sensor code \/
-  digitalWrite(trigpin, LOW);
+  /*
+    digitalWrite(trigpin, LOW);
   if (pulse) {
     if (TaskTimer >= 2) {
       digitalWrite(trigpin, HIGH);
@@ -216,6 +224,7 @@ void loop() {
 
   timing = pulseIn(echopin, HIGH);
   distance = (timing * 0.034) / 2;
+  */
   //Serial.println("Distance: " + distance);
   if (distance <= 10) {
     //just cut and pasted code from motor section
