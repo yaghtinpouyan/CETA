@@ -59,7 +59,7 @@ void pidController() {
   int16_t error = position - 1000; //current position (0 - 3000) - ideal position
   P = error;
   I = I + error;
-  D = error + lastError;
+  D = error - lastError;
   servoSpeed = P*Kp + I*Ki + D*Kd; //Calculates the correction value
   lastError = error;
 }
@@ -135,7 +135,7 @@ void loop() {
     (needs discussion on design and looking at rules)
   */
   //calibrate and start
-  if (calibrateButton == LOW) {
+  if (digitalRead(calibrateButton) == LOW) {
     /*
       if (TaskTimer >= 3000) {
       if (digitalRead(calibrateButton) == LOW) {
