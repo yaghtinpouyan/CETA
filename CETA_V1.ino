@@ -55,13 +55,13 @@ void calibrate() {
   calibratedCheck = true;  // mark calibration as done
 }
 //PID stuffs
-float Kp = 0.1;
+float Kp = 0.5;
 //float Ki = 0.0;
-float Kd = 0.5;
+float Kd = 5;
 float P, I, D, lastError, servoSpeed;
 void pidController() {
   //Read the position using sensors/library objects
-  int16_t error = position - 1000; //current position (0 - 3000) - ideal position
+  int16_t error = 1000 - position; //current position (0 - 3000) - ideal position
   P = error;
   //I = I + error;
   D = error - lastError;
@@ -188,21 +188,24 @@ void loop() {
   If servo exceeds maxspeed, limit servo to maxspeed
   Apply new values to servo, preferably with a function
   */
+  servoSpeed = constrain(servoSpeed, -400, 400);
   //2500 = right base speeds while going straight (about 80% max, change in testing to visualize pid)
   //500 = left  base speed
-  float lMotorSpeed = 1000.0 + servoSpeed; //Base 500
-  float rMotorSpeed = 2000.0 - servoSpeed; //Base 2500
+  float lMotorSpeed = 1200.0 + servoSpeed; //Base 500
+  float rMotorSpeed = 1800.0 - servoSpeed; //Base 2500
 
-  lMotorSpeed = constrain(lMotorSpeed, 0, 2000.0);
-  rMotorSpeed = constrain(rMotorSpeed, 1000.0, 3000.0);
+  lMotorSpeed = constrain(lMotorSpeed, 1000.0, 1800.0);
+  rMotorSpeed = constrain(rMotorSpeed, 1200.0, 2000.0);
   
-  lposFinal = map((int)lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
-  rposFinal = map((int)rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
-  Serial.println(lposFinal);
-  Serial.println(rposFinal);
-  
-  servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
-  servoR.write(rposFinal);
+  //lposFinal = map((int)lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
+  //rposFinal = map((int)rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
+  servoL.writeMicroseconds((int)lMotorSpeed);
+  servoR.writeMicroseconds((int)rMotorSpeed);
+
+  Serial.println(lMotorSpeed);
+  Serial.println(rMotorSpeed);
+  //servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
+  //servoR.write(rposFinal);
 
   if (crossingActive && crossingTimer >= 500) {
   crossingActive = false;
