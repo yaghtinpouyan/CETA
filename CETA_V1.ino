@@ -55,13 +55,14 @@ void calibrate() {
   calibratedCheck = true;  // mark calibration as done
 }
 //PID stuffs
-float Kp = 0.5;
+float Kp = 1.0;
 //float Ki = 0.0;
-float Kd = 5;
+float Kd = 0.0;
 float P, I, D, lastError, servoSpeed;
+int16_t error;
 void pidController() {
   //Read the position using sensors/library objects
-  int16_t error = 1000 - position; //current position (0 - 3000) - ideal position
+  error = 1000 - position; //current position (0 - 3000) - ideal position
   P = error;
   //I = I + error;
   D = error - lastError;
@@ -188,11 +189,14 @@ void loop() {
   If servo exceeds maxspeed, limit servo to maxspeed
   Apply new values to servo, preferably with a function
   */
-  servoSpeed = constrain(servoSpeed, -400, 400);
+  if (abs(error) > 400) {
+    servoSpeed *= 1.5;
+  }
+  servoSpeed = constrain(servoSpeed, -700, 700);
   //2500 = right base speeds while going straight (about 80% max, change in testing to visualize pid)
   //500 = left  base speed
-  float lMotorSpeed = 1200.0 + servoSpeed; //Base 500
-  float rMotorSpeed = 1800.0 - servoSpeed; //Base 2500
+  float lMotorSpeed = 1400.0 + servoSpeed; //Base 500
+  float rMotorSpeed = 1600.0 - servoSpeed; //Base 2500
 
   lMotorSpeed = constrain(lMotorSpeed, 1000.0, 1800.0);
   rMotorSpeed = constrain(rMotorSpeed, 1200.0, 2000.0);
@@ -202,8 +206,8 @@ void loop() {
   servoL.writeMicroseconds((int)lMotorSpeed);
   servoR.writeMicroseconds((int)rMotorSpeed);
 
-  Serial.println(lMotorSpeed);
-  Serial.println(rMotorSpeed);
+  //Serial.println(lMotorSpeed);
+  //Serial.println(rMotorSpeed);
   //servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
   //servoR.write(rposFinal);
 
@@ -217,7 +221,8 @@ void loop() {
   }
 
   // us sensor code \/
-    // Trigger a pulse every 60ms
+  /*
+      // Trigger a pulse every 60ms
   if (trigTimer >= 60) {
     digitalWrite(trigpin, HIGH);
     delayMicroseconds(10);
@@ -238,6 +243,7 @@ void loop() {
       turn180();
     }
   }
+  */
 }
 
 void turn180() {
