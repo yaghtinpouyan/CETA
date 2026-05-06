@@ -1,14 +1,14 @@
 //non blocking delays !!!
 #include <elapsedMillis.h>
 elapsedMillis TaskTimer;
-bool pulse = true;
-// motors and arm
+// motors
 #include <Servo.h>
 Servo servoL;
 Servo servoR;
-Servo armServo;
 int lposFinal, rposFinal;
 //some stuff required for logic \/
+elapsedMillis crossingTimer;
+bool crossingActive = false;
 int lineCrossed = -1; //tallying line crosses except for the starting line
 int requirement = 4; //4 turns, 2 laps
 bool start = false;
@@ -19,81 +19,71 @@ int startButton = 21;
 // ir sensor
 #include <QTRSensors.h>
 QTRSensors qtr;
+uint16_t sensors[3];
 int16_t position;
 const int sensorL = 28; //pre 26
 const int sensorM = 27; // pre 25
 const int sensorR = 26; //pre 24
 bool calibratedCheck = false;
 
+elapsedMillis calibrateTimer;
+
 void calibrate() {
   qtr.resetCalibration();
-  Serial.println("Calibrate Function Works!");
-  for (uint8_t i = 0; i < 100; i++) { //10 seconds on black, 10 on white
+  calibrateTimer = 0;
+
+  while (calibrateTimer < 10000) {  // 10 seconds for black
     qtr.calibrate();
-    if (TaskTimer >= 250) {
+    if (calibrateTimer % 500 < 250) {
       digitalWrite(LED_BUILTIN, HIGH);
-      if (TaskTimer >= 500) {
-        digitalWrite(LED_BUILTIN, LOW);
-        TaskTimer = 0;
-      }
+    } else {
+      digitalWrite(LED_BUILTIN, LOW);
     }
-    delay(100);
   }
-  Serial.println("Move robot");
-  for (uint8_t i = 0; i < 100; i++) { //10 seconds on black, 10 on white
+
+  calibrateTimer = 0;
+  while (calibrateTimer < 10000) {  // 10 seconds for white
     qtr.calibrate();
-    if (TaskTimer >= 100) {
+    if (calibrateTimer % 250 < 125) {
       digitalWrite(LED_BUILTIN, HIGH);
-      if (TaskTimer >= 500) {
-        digitalWrite(LED_BUILTIN, LOW);
-        TaskTimer = 0;
-      }
+    } else {
+      digitalWrite(LED_BUILTIN, LOW);
     }
-    delay(100);
   }
+
   digitalWrite(LED_BUILTIN, LOW);
-  Serial.println("Calibrate Function Finished!");
+  calibratedCheck = true;  // mark calibration as done
 }
-// PID settings and runtime vars
-float Kp = 0.60; // tune this
-float Ki = 0.00;
-float Kd = 0.15;
-float P = 0.0, I = 0.0, D = 0.0, lastError = 0.0, servoSpeed = 0.0;
-// debug and tuning helpers
-bool invertCorrection = false; // flip to true if correction sign is inverted
-const float I_WINDUP_LIMIT = 200.0; // limit integral term
-const int DEADZONE = 30; // small deadband around center to avoid hunting
-
-// QTR scaling constants (3 sensors -> 0..2000, center ~1000)
-const int NUM_SENSORS = 3;
-const int QTR_MAX = 1000 * (NUM_SENSORS - 1); // 2000 for 3 sensors
-const int QTR_MID = QTR_MAX / 2; // 1000
-
-// motor speed range in the same scale as QTR mapping (use a 1000-based range)
-const int MOTOR_MIN = 1000;
-const int MOTOR_MAX = 2000;
-const int MOTOR_STOP = 1500; // this corresponds to servo=90 (stop)
-
+//PID stuffs
+float Kp = 0.1;
+//float Ki = 0.0;
+float Kd = 0.5;
+float P, I, D, lastError, servoSpeed;
 void pidController() {
   //Read the position using sensors/library objects
-  float error = (float)position - (float)QTR_MID; // center on QTR_MID
-  // Apply deadzone
-  if (abs((int)error) < DEADZONE) error = 0;
+  int16_t error = position - 1000; //current position (0 - 3000) - ideal position
   P = error;
-  I = I + error;
-  // integral windup clamp
-  if (I > I_WINDUP_LIMIT) I = I_WINDUP_LIMIT;
-  if (I < -I_WINDUP_LIMIT) I = -I_WINDUP_LIMIT;
+  //I = I + error;
   D = error - lastError;
-  servoSpeed = Kp * P + Ki * I + Kd * D; // Calculates the correction value (float)
-  if (invertCorrection) servoSpeed = -servoSpeed;
+  servoSpeed = Kp * P + Kd * D; //previously P*Kp + I*Ki + D*Kd; Calculates the correction value
   lastError = error;
 }
 // us sensor
-  const int trigpin = 2; 
-  const int echopin = 3; 
-  float timing = 0.0;
-  float distance = 0.0;
+const int trigpin = 2;
+const int echopin = 3;
+volatile unsigned long echoStart = 0;
+volatile unsigned long echoEnd = 0;
+volatile bool echoReady = false;
+float distance = 0.0;
+elapsedMillis trigTimer;
+void echoISR() {
+  if (gpio_get(echopin)) {
+    echoStart = micros();
+  } else {
+    echoEnd = micros();
+    echoReady = true;
+  }
+}
 /*
 issues and to do
 calibration sequence
@@ -104,13 +94,6 @@ literally all the code
 buttons are on 31, 32 and 34
 */
 void setup() {
-  /*
-  initialize all pins
-  set up ultrasonic sensor
-  set up ir sensors
-  set up servo motors
-  Reset arm to starting position if need be
-  */
   //adafruit
   #define IO_USERNAME "placeholder"
   #define IO_KEY "placeholder"
@@ -129,13 +112,11 @@ void setup() {
   pinMode(echopin, INPUT);
   pinMode(trigpin, OUTPUT);
   digitalWrite(trigpin, LOW);
+  attachInterrupt(digitalPinToInterrupt(echopin), echoISR, CHANGE);
 
   servoL.attach(15); 
   servoR.attach(14);
-  armServo.attach(13);
-
-  // Start servos in stopped position
-  servoL.write(90);
+  servoL.write(90); 
   servoR.write(90);
 
   qtr.setTypeAnalog();
@@ -145,9 +126,14 @@ void setup() {
 }
 
 void loop() {
-  //Serial.println("Serial Monitor Begin");
-  //Serial.println(buttonVal);
-  //buttonVal = digitalRead(calibrateButton);
+  /*
+  Serial.println("Sensor 1");
+  Serial.println(sensors[0]);
+  Serial.println("Sensor 2");
+  Serial.println(sensors[1]);
+  Serial.println("Sensor 3");
+  Serial.println(sensors[2]);
+  */
   // pseudocode
   /*
   ir sensor
@@ -168,36 +154,32 @@ void loop() {
   */
   //calibrate and start
   if (digitalRead(calibrateButton) == LOW) {
-    /*
-      if (TaskTimer >= 3000) {
+    if (TaskTimer >= 3000) {
       if (digitalRead(calibrateButton) == LOW) {
+        detachInterrupt(digitalPinToInterrupt(echopin));
         calibrate();
+        attachInterrupt(digitalPinToInterrupt(echopin), echoISR, CHANGE);
         TaskTimer = 0;
       } else {TaskTimer = 0;}
     }
-    */
-    Serial.println("Calibrate Button Works!");
-    calibrate();
   }
   if (digitalRead(startButton) == LOW) {
-    start = true;
-    Serial.println("Start True");
-    Serial.println("Start button works!");
+  start = true;
   }
   if (digitalRead(resetButton) == LOW) {
-    Serial.println("Reset Button Press");
     servoL.write(90); 
     servoR.write(90);
-    while(true) {}
+    lineCrossed = -1;
+    requirement = 4;
+    start = false;
+    calibratedCheck = false;
   }
   if (start == false) {
     return;
   }
-  Serial.println("The code is working");
   //ir sensor detection \/
-  uint16_t sensors[3];
   position = qtr.readLineBlack(sensors);
-
+  Serial.println(position);
   pidController();
   //motor code (All detection logic will go here) \/
   /*
@@ -206,94 +188,78 @@ void loop() {
   If servo exceeds maxspeed, limit servo to maxspeed
   Apply new values to servo, preferably with a function
   */
-  // Base motor speeds (stop is MOTOR_STOP)
-  // We apply servoSpeed as correction: left = base + correction, right = base - correction
-  int baseSpeed = MOTOR_STOP; // neutral
-  float lMotorSpeedF = (float)baseSpeed + servoSpeed;
-  float rMotorSpeedF = (float)baseSpeed - servoSpeed;
+  //2500 = right base speeds while going straight (about 80% max, change in testing to visualize pid)
+  //500 = left  base speed
+  float lMotorSpeed = 1000.0 + servoSpeed; //Base 500
+  float rMotorSpeed = 2000.0 - servoSpeed; //Base 2500
 
-  // clamp to allowed range
-  if (lMotorSpeedF < MOTOR_MIN) lMotorSpeedF = MOTOR_MIN;
-  if (lMotorSpeedF > MOTOR_MAX) lMotorSpeedF = MOTOR_MAX;
-  if (rMotorSpeedF < MOTOR_MIN) rMotorSpeedF = MOTOR_MIN;
-  if (rMotorSpeedF > MOTOR_MAX) rMotorSpeedF = MOTOR_MAX;
-
-  // map to servo write range 0-180
-  lposFinal = map((int)lMotorSpeedF, MOTOR_MIN, MOTOR_MAX, 0, 180);
-  rposFinal = map((int)rMotorSpeedF, MOTOR_MIN, MOTOR_MAX, 0, 180);
-  // Telemetry for tuning: sensors[], position, PID components and servo outputs
-  Serial.print("S:"); Serial.print(sensors[0]); Serial.print(","); Serial.print(sensors[1]); Serial.print(","); Serial.print(sensors[2]);
-  Serial.print(" P"); Serial.print(P);
-  Serial.print(" I"); Serial.print(I);
-  Serial.print(" D"); Serial.print(D);
-  Serial.print(" pos:"); Serial.print(position);
-  Serial.print(" servoSpeed:"); Serial.print(servoSpeed);
-  Serial.print(" L:"); Serial.print(lposFinal);
-  Serial.print(" R:"); Serial.println(rposFinal);
-
+  lMotorSpeed = constrain(lMotorSpeed, 0, 2000.0);
+  rMotorSpeed = constrain(rMotorSpeed, 1000.0, 3000.0);
+  
+  lposFinal = map((int)lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
+  rposFinal = map((int)rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
+  Serial.println(lposFinal);
+  Serial.println(rposFinal);
+  
   servoL.write(lposFinal); //writes to servo (0 full back, 90 stop, 180 full forward)
   servoR.write(rposFinal);
 
-  if ((sensors[0] > 600) && (sensors[1] > 600) && (sensors[2] > 600))
+  if (crossingActive && crossingTimer >= 500) {
+  crossingActive = false;
+  }
+
+  if ((sensors[0] > 950) && (sensors[1] > 950) && (sensors[2] > 950))
   {
-    lineCrossed++;
-    if (lineCrossed == 0) {return;}
-    if (lineCrossed >= requirement) {start = false;} //robot should stop after 2 laps
-    // Turn around: spin left in place for a short period while monitoring sensors
-    servoL.write(0); // full forward on left
-    servoR.write(180); // full reverse on right (adjust if your servos/motor controller are inverted)
-    // wait until the line is no longer detected under center sensor (simple approach)
-    for (unsigned long t = millis(); millis() - t < 1000;) {
-      qtr.readLineBlack(sensors);
-      // if center sensor is clear (below threshold), break early
-      if (sensors[1] < 600) break;
-      delay(10);
-    }
-    // stop
-    servoL.write(90);
-    servoR.write(90);
-    return;
+    turn180();
   }
 
   // us sensor code \/
-  
+    // Trigger a pulse every 60ms
+  if (trigTimer >= 60) {
+    digitalWrite(trigpin, HIGH);
+    delayMicroseconds(10);
     digitalWrite(trigpin, LOW);
-  if (pulse) {
-    if (TaskTimer >= 2) {
-      digitalWrite(trigpin, HIGH);
-      TaskTimer = 0;
-    }
-    pulse = false;
+    trigTimer = 0;
   }
-  
-  if (!pulse) {
-    if (TaskTimer >= 10) {
-      digitalWrite(trigpin, LOW);
-      TaskTimer = 0;
-    }
-    pulse = true;
-  }
+  // Read result whenever ISR signals it's ready
+  if (echoReady) {
+    noInterrupts(); // briefly pause ISR to safely read shared vars
+    unsigned long duration = echoEnd - echoStart;
+    echoReady = false;
+    interrupts();
 
-  timing = pulseIn(echopin, HIGH);
-  distance = (timing * 0.034) / 2;
-  
-  //Serial.println("Distance: " + distance);
-  if (distance <= 10) {
-    //just cut and pasted code from motor section
-    requirement = 2; //Should stop after a lap to the obstacle and back due to the logic in motor section
-    lineCrossed++;
-    if (lineCrossed == 0) {return;}
-    // Turn around on obstacle detection
-    servoL.write(0);
-    servoR.write(180);
-    for (unsigned long t = millis(); millis() - t < 1000;) {
-      qtr.readLineBlack(sensors);
-      if (sensors[1] < 600) break;
-      delay(10);
+    distance = (duration * 0.034) / 2.0;
+
+    if (distance > 0 && distance <= 10) {
+      requirement = 2;
+      turn180();
     }
+  }
+}
+
+void turn180() {
+  if (crossingActive) { return; }
+  
+  crossingActive = true;
+  crossingTimer = 0;
+  lineCrossed++;
+
+  if (lineCrossed == 0) { return; }
+  if (lineCrossed >= requirement) {
+    start = false;
     servoL.write(90);
     servoR.write(90);
     return;
-    // maybe add buzzer noise for fun
   }
+    //Turn around
+    servoL.write(0); //full
+    servoR.write(0); //reverse
+    while (true) {
+    int16_t pos = qtr.readLineBlack(sensors);
+    if (pos >= 900 && pos <= 1100) { break; }
+    } 
+    servoL.write(30);  // nudge forward briefly
+    servoR.write(180);
+    delay(50);
+    return;
 }
