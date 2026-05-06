@@ -191,8 +191,8 @@ void setup() {
 
   servoL.attach(servoLpin);
   servoR.attach(servoRpin);
-  servoL.writeMicroseconds(SERVO_US_STOP_L);
-  servoR.writeMicroseconds(SERVO_US_STOP_R);
+  servoL.writeMicroseconds(SERVO_US_STOP);
+  servoR.writeMicroseconds(SERVO_US_STOP);
 
   qtr.setTypeAnalog();
   qtr.setSensorPins((const uint8_t[]){qtrSensorL, qtrSensorM, qtrSensorR}, 3);
@@ -250,8 +250,8 @@ void loop() {
   // Main state machine
   if (state == IDLE) {
     // ensure motors stopped
-    servoL.writeMicroseconds(SERVO_US_STOP_L);
-    servoR.writeMicroseconds(SERVO_US_STOP_R);
+    servoL.writeMicroseconds(SERVO_US_STOP);
+    servoR.writeMicroseconds(SERVO_US_STOP);
     return;
   }
 
