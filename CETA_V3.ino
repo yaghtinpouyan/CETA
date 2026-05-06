@@ -7,7 +7,6 @@
 // - Simple serial tuning and debug prints
 // - Calibration hooks left in; does not overwrite V1/V2
 
-#include <elapsedMillis.h>
 #include <Servo.h>
 #include <QTRSensors.h>
 
@@ -28,12 +27,12 @@ const int servoRpin = 14; // right drive servo (user)
 
 // Servo microsecond baseline values measured on your robot
 // Left servo is reversed (lower microseconds -> forward). Right is normal (higher -> forward)
-const int BASE_US_LEFT = 1300;  // baseline forward-ish microseconds for left (user-provided approx)
-const int BASE_US_RIGHT = 1700; // baseline forward-ish microseconds for right (user-provided approx)
+int BASE_US_LEFT = 1300;  // baseline forward-ish microseconds for left (user-provided approx)
+int BASE_US_RIGHT = 1700; // baseline forward-ish microseconds for right (user-provided approx)
 const int SERVO_US_MIN = 1000;  // absolute min safe microseconds
 const int SERVO_US_MAX = 2000;  // absolute max safe microseconds
 const int SERVO_US_STOP = 1500; // universal stop microsecond (center)
-const int SERVO_US_MAX_DELTA = 500; // max delta from stop
+int SERVO_US_MAX_DELTA = 500; // max delta from stop
 
 // QTR / PID constants (start conservative and tune)
 float Kp = 0.8; // proportional
@@ -46,6 +45,15 @@ float lastError = 0;
 unsigned long lastPidTime = 0;
 float pidOutput = 0;
 const float I_MAX = 500.0; // cap integral term to avoid windup
+// smoothing for noisy position readings
+float smoothPosition = 1500.0;
+float SMOOTH_ALPHA = 0.28; // EMA alpha (0..1), increase to follow faster
+
+// crossing detection threshold (tunable)
+int CROSSING_THRESHOLD = 700; // lower than previous 950; tune after calibration
+
+// measured center position (useful if sensor array isn't perfectly centered)
+float centerPosition = 1500.0;
 
 // QTR sensor object
 QTRSensors qtr;
@@ -61,12 +69,12 @@ enum RobotState { IDLE, RUNNING, TURNING };
 RobotState state = IDLE;
 
 // Turn handling
-elapsedMillis turnTimer;
+ unsigned long turnTimer = 0;
 bool turnRequested = false;
 
 // Misc
-elapsedMillis loopTimer;
-elapsedMillis calibrateTimer;
+ unsigned long loopTimer = 0;
+ unsigned long calibrateTimer = 0;
 bool calibrated = false;
 int lineCrossed = -1;
 int requirement = 4; // laps/turns requirement
@@ -114,8 +122,10 @@ void computePID() {
   float dt = (lastPidTime == 0) ? 0.01f : (now - lastPidTime) / 1000000.0f; // seconds
   if (dt <= 0) dt = 0.01f;
 
+  // Use smoothed position for PID to reduce noise
+  float pos = smoothPosition; // already in 0..3000
   // QTR position: 0..3000, center ~1500
-  float error = 1500.0f - (float)position; // positive => line is to the right (we'll steer right)
+  float error = centerPosition - pos; // positive => line is to the right (we'll steer right)
 
   pidP = error;
   pidI += error * dt;
@@ -131,7 +141,7 @@ void computePID() {
 void requestTurn180() {
   if (state == TURNING) return;
   state = TURNING;
-  turnTimer = 0;
+  turnTimer = millis();
   turnRequested = true;
   lineCrossed++;
 }
@@ -146,7 +156,7 @@ void doNonBlockingTurn() {
   }
 
   // Phase 1: initial pivot burst to start rotating
-  if (turnTimer < 250) {
+  if (millis() - turnTimer < 250) {
     // Left forward (remember left is reversed: lower us -> forward)
     int leftUs = constrain(BASE_US_LEFT - 300, SERVO_US_MIN, SERVO_US_MAX);
     int rightUs = SERVO_US_STOP; // keep right near stop for pivot
@@ -203,6 +213,77 @@ void setup() {
 }
 
 void loop() {
+  // Serial command handling: 'c' capture current smoothPosition as center; 'd' toggle debug
+  if (Serial.available()) {
+    char ch = Serial.read();
+    // single-key commands
+    if (ch == 'c') {
+      centerPosition = smoothPosition;
+      Serial.print("Captured centerPosition="); Serial.println(centerPosition);
+    } else if (ch == 'd') {
+      debugPrint = !debugPrint;
+      Serial.print("debug="); Serial.println(debugPrint);
+    } else if (ch == 'S') {
+      // print status
+      Serial.print("center="); Serial.print(centerPosition);
+      Serial.print(" baseL="); Serial.print(BASE_US_LEFT);
+      Serial.print(" baseR="); Serial.print(BASE_US_RIGHT);
+      Serial.print(" Kp="); Serial.print(Kp);
+      Serial.print(" Ki="); Serial.print(Ki);
+      Serial.print(" Kd="); Serial.print(Kd);
+      Serial.print(" alpha="); Serial.print(SMOOTH_ALPHA);
+      Serial.print(" thresh="); Serial.println(CROSSING_THRESHOLD);
+    } else if (ch == 'l' || ch == 'L' || ch == 'r' || ch == 'R') {
+      // adjust servo bases: lowercase = -10, uppercase = +10
+      int delta = (isupper(ch) ? 10 : -10);
+      if (ch == 'l' || ch == 'L') {
+        BASE_US_LEFT = constrain(BASE_US_LEFT + delta, SERVO_US_MIN, SERVO_US_MAX);
+        Serial.print("BASE_US_LEFT="); Serial.println(BASE_US_LEFT);
+      } else if (ch == 'r' || ch == 'R') {
+        BASE_US_RIGHT = constrain(BASE_US_RIGHT + delta, SERVO_US_MIN, SERVO_US_MAX);
+        Serial.print("BASE_US_RIGHT="); Serial.println(BASE_US_RIGHT);
+      }
+    } else if (ch == 'p' || ch == 'P' || ch == 'i' || ch == 'I' || ch == 'k' || ch == 'K') {
+      // adjust PID gains: lowercase dec, uppercase inc
+      float d = (isupper(ch) ? 0.05f : -0.05f);
+      if (ch == 'p' || ch == 'P') { Kp = clampf(Kp + d, 0.0f, 10.0f); Serial.print("Kp="); Serial.println(Kp); }
+      if (ch == 'i' || ch == 'I') { Ki = clampf(Ki + d, -1.0f, 1.0f); Serial.print("Ki="); Serial.println(Ki); }
+      if (ch == 'k' || ch == 'K') { Kd = clampf(Kd + d, 0.0f, 10.0f); Serial.print("Kd="); Serial.println(Kd); }
+    } else if (ch == 'a' || ch == 'A') {
+      // adjust smoothing alpha by 0.05
+      float d = (isupper(ch) ? 0.05f : -0.05f);
+      float newAlpha = clampf(SMOOTH_ALPHA + d, 0.02f, 0.95f);
+      Serial.print("alpha: "); Serial.print(SMOOTH_ALPHA); Serial.print(" -> "); Serial.println(newAlpha);
+      SMOOTH_ALPHA = newAlpha;
+    } else if (ch == 't' || ch == 'T') {
+      // adjust threshold by +/-25
+      int dd = (isupper(ch) ? 25 : -25);
+      CROSSING_THRESHOLD = constrain(CROSSING_THRESHOLD + dd, 200, 1500);
+      Serial.print("CROSSING_THRESHOLD="); Serial.println(CROSSING_THRESHOLD);
+    }
+    else if (ch == '1') {
+      // nudge left forward
+      int us = constrain(BASE_US_LEFT - 120, SERVO_US_MIN, SERVO_US_MAX);
+      servoL.writeMicroseconds(us);
+      Serial.print("Left nudge forward -> "); Serial.println(us);
+    } else if (ch == '2') {
+      // nudge left back
+      int us = constrain(BASE_US_LEFT + 120, SERVO_US_MIN, SERVO_US_MAX);
+      servoL.writeMicroseconds(us);
+      Serial.print("Left nudge back -> "); Serial.println(us);
+    } else if (ch == '3') {
+      // nudge right forward
+      int us = constrain(BASE_US_RIGHT + 120, SERVO_US_MIN, SERVO_US_MAX);
+      servoR.writeMicroseconds(us);
+      Serial.print("Right nudge forward -> "); Serial.println(us);
+    } else if (ch == '4') {
+      // nudge right back
+      int us = constrain(BASE_US_RIGHT - 120, SERVO_US_MIN, SERVO_US_MAX);
+      servoR.writeMicroseconds(us);
+      Serial.print("Right nudge back -> "); Serial.println(us);
+    }
+    // Note: some parameters are declared const; for live adjust we can add mutable variables if you want
+  }
   // Calibration: if calibrate button held for >2s, run calibration
   if (digitalRead(pinCalibrateButton) == LOW) {
     if (calibrateTimer > 2000) {
@@ -262,6 +343,10 @@ void loop() {
 
   // RUNNING state: normal line follow
   position = qtr.readLineBlack(sensors);
+  // exponential moving average smoothing to reduce jitter
+  smoothPosition = (SMOOTH_ALPHA * (float)position) + ((1.0 - SMOOTH_ALPHA) * smoothPosition);
+  // clamp just in case
+  smoothPosition = clampf(smoothPosition, 0.0, 3000.0);
   computePID();
 
   // Convert pidOutput to microsecond correction. Tunable scale.
@@ -275,11 +360,20 @@ void loop() {
   applyMotorOutput(correctionUs);
 
   // Detect full-line crossing (all sensors see dark)
-  if ((sensors[0] > 950) && (sensors[1] > 950) && (sensors[2] > 950)) {
+  if ((sensors[0] > CROSSING_THRESHOLD) && (sensors[1] > CROSSING_THRESHOLD) && (sensors[2] > CROSSING_THRESHOLD)) {
     // simple debounce with elapsedMillis
     if (!turnRequested) {
       requestTurn180();
     }
+  }
+
+  // Periodic debug: print raw sensors and smoothed position if debug enabled
+  static unsigned long lastDebug = 0;
+  if (debugPrint && millis() - lastDebug > 200) {
+    lastDebug = millis();
+    Serial.print("raw:"); Serial.print(sensors[0]); Serial.print(','); Serial.print(sensors[1]); Serial.print(','); Serial.print(sensors[2]);
+    Serial.print(" smooth:"); Serial.print(smoothPosition);
+    Serial.print(" pid:"); Serial.println(pidOutput);
   }
 
   // Optional: check ultrasonic (left as future addition)
