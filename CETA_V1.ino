@@ -66,7 +66,7 @@ void pidController() {
   P = error;
   //I = I + error;
   D = error - lastError;
-  servoSpeed = Kp * P + Kd * D; //previously P*Kp + I*Ki + D*Kd; Calculates the correction value
+  servoSpeed = (Kp * P + Kd * D) * 1.5; //previously P*Kp + I*Ki + D*Kd; Calculates the correction value
   lastError = error;
 }
 // us sensor
@@ -127,14 +127,12 @@ void setup() {
 }
 
 void loop() {
-  /*
   Serial.println("Sensor 1");
   Serial.println(sensors[0]);
   Serial.println("Sensor 2");
   Serial.println(sensors[1]);
   Serial.println("Sensor 3");
   Serial.println(sensors[2]);
-  */
   // pseudocode
   /*
   ir sensor
@@ -195,11 +193,11 @@ void loop() {
   servoSpeed = constrain(servoSpeed, -700, 700);
   //2500 = right base speeds while going straight (about 80% max, change in testing to visualize pid)
   //500 = left  base speed
-  float lMotorSpeed = 1400.0 + servoSpeed; //Base 500
-  float rMotorSpeed = 1600.0 - servoSpeed; //Base 2500
+  float lMotorSpeed = 1300.0 + servoSpeed; //Base 500
+  float rMotorSpeed = 1700.0 - servoSpeed; //Base 2500
 
-  lMotorSpeed = constrain(lMotorSpeed, 1000.0, 1800.0);
-  rMotorSpeed = constrain(rMotorSpeed, 1200.0, 2000.0);
+  lMotorSpeed = constrain(lMotorSpeed, 1000.0, 1500.0);
+  rMotorSpeed = constrain(rMotorSpeed, 1500.0, 2000.0);
   
   //lposFinal = map((int)lMotorSpeed, 0, 3000, 0, 180); //motorspeed, min (0), max (3000), 0, 180,
   //rposFinal = map((int)rMotorSpeed, 0, 3000, 0, 180); //values are 0 and 3000 to match ir sensor values (any plausible range should work theoretically)
