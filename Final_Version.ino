@@ -47,6 +47,9 @@ volatile bool echoReady = false;
 float distance = 0.0;
 elapsedMillis trigTimer;
 
+// ── Calibration ───────────────────────────────────────────────────────────────
+int avgWhite = 0;  // FIX: declared missing global variable
+
 void echoISR() {
   if (gpio_get(echopin)) {
     echoStart = micros();
@@ -198,17 +201,18 @@ void loop() {
       else if (rightVal >= 1000) {
         turn_right();
         Serial.println("RIGHT");
-      
 
       } else if (leftVal <= 1000 && rightVal <= 1000 && centerVal <= 1000) {
         turn_around();
-        Serial.println("recovering")
+        Serial.println("recovering");   // FIX: added missing semicolon
 
-  } else {
-    robot_forward();
-    Serial.println("Moving along")
-  }
-}
+      } else {
+        robot_forward();
+        Serial.println("Moving along"); // FIX: added missing semicolon
+      }
+    }
+  } // FIX: added missing closing brace for if (toggleState)
+} // FIX: added missing closing brace for loop()
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Calibration
