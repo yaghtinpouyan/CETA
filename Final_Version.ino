@@ -168,12 +168,12 @@ void loop() {
 
     // ── All-black = end-of-track line ───────────────────────────────────────
     else if (leftVal >= 1000 && centerVal >= 1000 && rightVal >= 1000) {
-      if (!inBlackArea) {
         lineCounter++;
         inBlackArea = true;
         Serial.print("Line Counter incremented to: ");
         Serial.println(lineCounter);
-      }
+        turn_around();
+
       /*
         if (lineCounter < 5) {
         turn_around();
