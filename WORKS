@@ -1,0 +1,247 @@
+#include <Servo.h>
+#include <QTRSensors.h>
+
+Servo servoL;
+Servo servoR;
+
+// ---------------- SENSORS ----------------
+
+const int sensorL = 28;
+const int sensorM = 27;
+const int sensorR = 26;
+
+QTRSensors qtr;
+uint16_t sensors[3];
+
+int leftVal, centerVal, rightVal;
+
+// ---------------- THRESHOLD ----------------
+
+const int BLACK_THRESHOLD = 1000;
+
+// ---------------- MOTOR VALUES ----------------
+
+const int STOP = 90;
+
+// normal motion
+const int FWD_L = 75;
+const int FWD_R = 105;
+
+const int LEFT_L = 90;
+const int LEFT_R = 70;
+
+const int RIGHT_L = 110;
+const int RIGHT_R = 90;
+
+const int TURN_L = 120;
+const int TURN_R = 60;
+
+// ---------------- CURVE MOTION (FIXED) ----------------
+// IMPORTANT: must stay strongly moving, NOT near 90
+
+const int CURVE_R_L = 78;   // strong forward
+const int CURVE_R_R = 108;  // slow right wheel
+
+const int CURVE_L_L = 70;   // slow left wheel
+const int CURVE_L_R = 100;  // strong forward
+
+// ---------------- STATE ----------------
+
+bool firstIntersectionHandled = false;
+bool previouslyAllBlack = false;
+
+bool curveMode = false;
+unsigned long curveStart = 0;
+const int curveLockTime = 200;
+
+// recovery
+bool recovering = false;
+unsigned long recoveryStart = 0;
+const int recoveryTime = 250;
+
+// ---------------- SERIAL ----------------
+
+unsigned long lastSerial = 0;
+const int serialDelay = 120;
+
+// ---------------- MOTOR HELPERS ----------------
+
+int lastL = -1;
+int lastR = -1;
+
+void setMotors(int l, int r) {
+    if (l == lastL && r == lastR) return;
+
+    servoL.write(l);
+    servoR.write(r);
+
+    lastL = l;
+    lastR = r;
+}
+
+// ---------------- MOVES ----------------
+
+void robot_stop() {
+    setMotors(STOP, STOP);
+}
+
+void robot_forward() {
+    setMotors(FWD_L, FWD_R);
+}
+
+void turn_left() {
+    setMotors(LEFT_L, LEFT_R);
+}
+
+void turn_right() {
+    setMotors(RIGHT_L, RIGHT_R);
+}
+
+void turn_around() {
+    setMotors(TURN_L, TURN_R);
+}
+
+// ---------------- CURVES (FIXED CORE) ----------------
+
+void curve_right() {
+    setMotors(CURVE_R_L, CURVE_R_R);
+}
+
+void curve_left() {
+    setMotors(CURVE_L_L, CURVE_L_R);
+}
+
+// ---------------- SERIAL ----------------
+
+void printSlow(String msg) {
+    if (millis() - lastSerial > serialDelay) {
+        Serial.println(msg);
+        lastSerial = millis();
+    }
+}
+
+// ---------------- SETUP ----------------
+
+void setup() {
+    Serial.begin(115200);
+
+    servoL.attach(15);
+    servoR.attach(14);
+
+    robot_stop();
+
+    qtr.setTypeAnalog();
+    qtr.setSensorPins((const uint8_t[]){sensorL, sensorM, sensorR}, 3);
+
+    delay(1000);
+    Serial.println("STARTED");
+}
+
+// ---------------- LOOP ----------------
+
+void loop() {
+
+    qtr.read(sensors);
+
+    leftVal = sensors[0];
+    centerVal = sensors[1];
+    rightVal = sensors[2];
+
+    bool allBlack =
+        (leftVal >= BLACK_THRESHOLD &&
+         centerVal >= BLACK_THRESHOLD &&
+         rightVal >= BLACK_THRESHOLD);
+
+    if (!allBlack) previouslyAllBlack = false;
+
+    // ---------------- INTERSECTION ----------------
+
+    if (allBlack && !previouslyAllBlack) {
+
+        previouslyAllBlack = true;
+        curveMode = false;
+        recovering = false;
+
+        if (!firstIntersectionHandled) {
+            robot_forward();
+            firstIntersectionHandled = true;
+            printSlow("INTERSECTION 1 -> FORWARD");
+            return;
+        }
+
+        turn_around();
+        printSlow("INTERSECTION -> TURN");
+        return;
+    }
+
+    // ---------------- CURVE DETECTION ----------------
+
+    if (!curveMode) {
+
+        if (rightVal > leftVal + 120) {
+            curveMode = true;
+            curveStart = millis();
+            printSlow("CURVE RIGHT ENTER");
+        }
+        else if (leftVal > rightVal + 120) {
+            curveMode = true;
+            curveStart = millis();
+            printSlow("CURVE LEFT ENTER");
+        }
+    }
+
+    // ---------------- CURVE MODE ----------------
+
+    if (curveMode) {
+
+        recovering = false;
+
+        if (millis() - curveStart < curveLockTime) {
+
+            if (rightVal > leftVal) curve_right();
+            else curve_left();
+
+            printSlow("CURVE MODE");
+            return;
+        }
+
+        curveMode = false;
+    }
+
+    // ---------------- NORMAL TRACKING ----------------
+
+    if (rightVal >= BLACK_THRESHOLD) {
+        turn_right();
+        printSlow("RIGHT");
+        return;
+    }
+
+    if (leftVal >= BLACK_THRESHOLD) {
+        turn_left();
+        printSlow("LEFT");
+        return;
+    }
+
+    if (centerVal >= BLACK_THRESHOLD) {
+        robot_forward();
+        printSlow("FORWARD");
+        return;
+    }
+
+    // ---------------- RECOVERY ----------------
+
+    if (!recovering) {
+        recovering = true;
+        recoveryStart = millis();
+    }
+
+    if (millis() - recoveryStart < recoveryTime) {
+
+        robot_forward();
+        printSlow("RECOVER HOLD");
+        return;
+    }
+
+    robot_forward();
+    printSlow("RECOVER SEARCH");
+}
